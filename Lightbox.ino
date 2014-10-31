@@ -1,3 +1,40 @@
+/* FUTURE IDEAS:
+
+All lit LEDs "fall" into a pile on one edge
+All lit LEDs are sucked into a central point or axis
+Scroll mode to/from an axis instead of an edge
+Tracer mode with bands of LEDs instead of points
+Tracers that enter from opposite directions and collide in an "explosion"
+Tracers that enter from opposite directions and collide in a white point that bursts into several tracers
+Matrix mode - continuous tracers from one direction that leave behind fixed pixels (digital rain)
+Fireworks - field goes to black, tracers enter from edges and "explode" into colored pixels that fade out
+Tron lightcycles
+
+*/
+
+/*
+  CHANGELOG
+
+  20141028
+    Added wave and undulate modes
+  20140912
+    Changed timing system to use global timers for minor/major effects instead of separate timers for each effect with percent chances for each effect
+    Added 2048 mode
+  20140910
+    Changed timings on blinkenlietz, starfield and Game Of Life
+  20140710
+    Added starfield and blinkenlietz
+    Changed tracers to bounce off of lit LEDs when running along the edge of the field
+    Tweaked start times of all modes
+*/
+
+
+/*
+  TO FADE TO A NEW COLOR INCREMENTALLY:
+    MULTIPLIER = (ELAPSED_TIME <= TOTAL_TIME) ? ((ELAPSED_TIME * 1.0) / TOTAL_TIME) : 1.0
+    NEW_COLOR = START_COLOR + ((TARGET_COLOR - START_COLOR) * MULTIPLIER)
+*/
+
 /*
  * Wiring:
  *   DC negative = LED string BLUE + GND among digital pins + GND among power pins
@@ -81,8 +118,31 @@
 #define MODE_BLINKENLIETZ       5
 // Plays a game of 2048 (look it up)
 #define MODE_TWENTY48           6
+// One or more waves of color spread out across the field
+#define MODE_WAVE               7
+// One or more waves of undulating color spread out across the field
+#define MODE_UNDULATE           8
 // The total number of modes listed above
-#define NUM_MODE                7
+#define NUM_MODE                9
+
+/*
+ * The following percent chances control whether an effect will start when it's
+ * time for a major effect.  The total of all the percents should add up to 100.
+ */
+// Game of Life
+#define LIFE_CHANCE_PERCENT             8
+// Scroll
+#define SCROLL_CHANCE_PERCENT           15
+// Starfield
+#define STARFIELD_CHANCE_PERCENT        10
+// Blinkenlietz
+#define BLINKENLIETZ_CHANCE_PERCENT     25
+// Game of 2048
+#define TWENTY48_CHANCE_PERCENT         7
+// Wave of colors
+#define WAVE_CHANCE_PERCENT             20
+// Undulating field
+#define UNDULATE_CHANCE_PERCENT         15
 
 
 /*
@@ -142,17 +202,6 @@
 #define FADESAME_MAX_MSECS              1000
 
 
-/*
- * The following submodes are only used within the mode[] array, never for the
- * mode_field or next_time[] variables
- */
-// Modes for each LED during the Game.  The ALIVE states must be sequential
-#define LIFE_LEDMODE_BIRTHING   10
-#define LIFE_LEDMODE_ALIVE      11
-#define LIFE_LEDMODE_DYING      (LIFE_LEDMODE_ALIVE + LIFE_LIFESPAN)
-#define LIFE_LEDMODE_DEAD       (LIFE_LEDMODE_ALIVE + LIFE_LIFESPAN + 1)
-
-
 /********************************************************************************
  ********************************************************************************
  ********************************************************************************
@@ -183,8 +232,6 @@
  ********************************************************************************
  ********************************************************************************
  ********************************************************************************/
-// Percent chance a Game will start when it's time for a major effect
-#define LIFE_CHANCE_PERCENT             30
 // Do not start a Game unless this number of LEDs are lit
 #define LIFE_LED_MIN                    ((byte)(NUM_LED / 6.5))
 // Postpone starting a major effect by a number in this range if a Game can't start when scheduled
@@ -208,6 +255,15 @@
 // Living LEDs die if they have a number of neighbors in this range
 #define LIFE_OVERCROWDING_MIN           3
 #define LIFE_OVERCROWDING_MAX           8
+/*
+ * The following submodes are only used within the mode[] array, never for the
+ * mode_field or next_time[] variables
+ */
+// Modes for each LED during the Game.  The ALIVE states must be sequential
+#define LIFE_LEDMODE_BIRTHING   10
+#define LIFE_LEDMODE_ALIVE      11
+#define LIFE_LEDMODE_DYING      (LIFE_LEDMODE_ALIVE + LIFE_LIFESPAN)
+#define LIFE_LEDMODE_DEAD       (LIFE_LEDMODE_ALIVE + LIFE_LIFESPAN + 1)
 
 
 /********************************************************************************
@@ -217,8 +273,6 @@
  ********************************************************************************
  ********************************************************************************
  ********************************************************************************/
-// Percent chance a scroll will start when it's time for a major effect
-#define SCROLL_CHANCE_PERCENT           25
 // Delay starting a scroll by a number in this range
 #define SCROLL_TIME_MIN_MSECS           200000
 #define SCROLL_TIME_MAX_MSECS           400000
@@ -239,8 +293,8 @@
  ********************************************************************************
  ********************************************************************************
  ********************************************************************************/
-// Percent chance a scroll will start when it's time for a minor effect
-#define TRACER_CHANCE_PERCENT           10
+// Percent chance a tracer will start when it's time for a minor effect
+#define TRACER_CHANCE_PERCENT           7
 // Do not start more than this number of tracers simultaneously
 #define TRACER_MAX_ACTIVE               3
 #define INVALID_TRACER                  (TRACER_MAX_ACTIVE + 1)
@@ -270,8 +324,6 @@
  ********************************************************************************
  ********************************************************************************
  ********************************************************************************/
-// Percent chance a starfield will start when it's time for a major effect
-#define STARFIELD_CHANCE_PERCENT        30
 // Once a field has started, delay ending by a number in this range
 #define STARFIELD_TIME_END_MIN_MSECS    90000
 #define STARFIELD_TIME_END_MAX_MSECS    120000
@@ -302,8 +354,6 @@
  ********************************************************************************
  ********************************************************************************
  ********************************************************************************/
-// Percent chance a starfield will start when it's time for a major effect
-#define BLINKENLIETZ_CHANCE_PERCENT        50
 // Once a field has started, delay ending by a number in this range
 #define BLINKENLIETZ_TIME_END_MIN_MSECS    90000
 #define BLINKENLIETZ_TIME_END_MAX_MSECS    120000
@@ -338,8 +388,6 @@
  ********************************************************************************
  ********************************************************************************
  ********************************************************************************/
-// Percent chance a game will start when it's time for a major effect
-#define TWENTY48_CHANCE_PERCENT                 30
 // Once a game has started, delay ending by a number in this range
 #define TWENTY48_TIME_END_MIN_MSECS             90000
 #define TWENTY48_TIME_END_MAX_MSECS             120000
@@ -360,6 +408,61 @@
 #define TWENTY48_MAX_COLORS                     12
 // The percent chance a new tile will have a value of 2 instead of 1
 #define TWENTY48_NEW_TILE_DOUBLE_PERCENT        25
+
+
+/********************************************************************************
+ ********************************************************************************
+ ********************************************************************************
+ *** WAVE CONSTANTS
+ ********************************************************************************
+ ********************************************************************************
+ ********************************************************************************/
+// The number of colors in each color wave
+#define WAVE_MIN_COLORS         1
+#define WAVE_MAX_COLORS         7
+// Invalid number for a wave
+#define WAVE_INVALID            (WAVE_MAX_COLORS + 2)
+// The range of time each LED needs to brighten to full intensity
+#define WAVE_MIN_BRIGHT_MSECS   750
+#define WAVE_MAX_BRIGHT_MSECS   2000
+// The range of time each LED should hold at full intensity before fading
+#define WAVE_MIN_HOLD_MSECS     500
+#define WAVE_MAX_HOLD_MSECS     5000
+// The range of time to delay propagation of color from a full-bright LED to a neighbor
+#define WAVE_MIN_DELAY_MSECS    0
+#define WAVE_MAX_DELAY_MSECS    2000
+// Chance one of the wave colors will be black
+#define WAVE_BLACK_PERCENT      50
+
+
+/********************************************************************************
+ ********************************************************************************
+ ********************************************************************************
+ *** WAVE CONSTANTS
+ ********************************************************************************
+ ********************************************************************************
+ ********************************************************************************/
+// The number of colors in undulating wave
+#define UNDULATE_MIN_COLORS     1
+#define UNDULATE_MAX_COLORS     4
+// Invalid number for a color
+#define UNDULATE_INVALID_COLOR  (UNDULATE_MAX_COLORS + 2)
+// The range of time each LED takes to brighten to full intensity - constant for all colors
+#define UNDULATE_MIN_UP_MSECS   1000
+#define UNDULATE_MAX_UP_MSECS   4000
+// The range of time each LED takes to fade to black - constant for all colors
+#define UNDULATE_MIN_DOWN_MSECS 1000
+#define UNDULATE_MAX_DOWN_MSECS 4000
+// The range of time to delay spreading the initial color from a full-bright LED to a neighbor
+#define UNDULATE_MIN_DELAY_MSECS        500
+#define UNDULATE_MAX_DELAY_MSECS        3000
+// The range of up/down blinks for each LED - constant for all colors
+#define UNDULATE_MIN_UPDOWN     5
+#define UNDULATE_MAX_UPDOWN     10
+// Additional delay to apply to each LED each time it becomes black - hides the edge of the wave after the entire field is undulating
+#define UNDULATE_MIN_BLACK_DELAY_MSECS  500
+#define UNDULATE_MAX_BLACK_DELAY_MSECS  1500
+
 
 /*
  * GLOBAL VARIABLES
@@ -478,7 +581,51 @@ union
     byte value[NUM_LED];
     // Color of each numeric value
     byte color[TWENTY48_MAX_COLORS][3];
+    // If each LED has already been combined with another in this move
+    boolean combined[NUM_LED];
     } twenty48;
+
+  // MODE_WAVE
+  struct
+    {
+    // Time needed to brighten an LED to full intensity (per color)
+    unsigned long bright_time;
+    // Time to hold an LED at full intensity (per color)
+    unsigned long wave_time;
+    // Number of waves of color
+    byte num_colors;
+    // Color of each LED
+    byte color_num[NUM_LED];
+    // Color of each wave
+    byte colors[WAVE_MAX_COLORS + 1][3];
+    // Original color of each LED
+    byte saved_color[NUM_LED][3];
+    // Time each LED began brightening (per color)
+    unsigned long start_time[NUM_LED];
+    } wave;
+
+  // MODE_UNDULATE
+  struct
+    {
+    // Number of waves of color
+    byte num_colors;
+    // The color each LED is current using
+    byte color_num[NUM_LED];
+    // The color of each wave
+    byte color[UNDULATE_MAX_COLORS][3];
+    // The original color of each LED before the waves start
+    byte saved_color[NUM_LED][3];
+    // The number of blinks each LED has made within the current color
+    byte updown[NUM_LED];
+    // The number of blinks each LED should make before moving to the next color
+    byte num_updown;
+    // The time each LED began its brightening or fading, future times indicate a pause
+    unsigned long start_time[NUM_LED];
+    // The amount of time each LED needs to brighten to full intensity
+    unsigned long up_time;
+    // The amount of time each LED needs to fade to black
+    unsigned long down_time;
+    } undulate;
 
   } permode;
 
@@ -1924,6 +2071,9 @@ boolean move_twenty48(unsigned long current_time)
             prev_led |= 0x01 << permode.twenty48.direction;
           }
         }
+
+      for (i = 0; i < NUM_LED; i++)
+        permode.twenty48.combined[i] = 0;
       }
 
     if (permode.twenty48.direction != INVALID_DIRECTION)
@@ -1958,7 +2108,9 @@ boolean move_twenty48(unsigned long current_time)
                 (permode.twenty48.value[current_led] > 0))
               {
               permode.twenty48.value[prev_led] = permode.twenty48.value[current_led];
+              permode.twenty48.combined[prev_led] = permode.twenty48.combined[current_led];
               permode.twenty48.value[current_led] = 0;
+              permode.twenty48.combined[current_led] = 0;
 
               COPY_COLOR(color[prev_led], permode.twenty48.color[permode.twenty48.value[prev_led]]);
               SET_BLACK(color[current_led]);
@@ -1966,10 +2118,13 @@ boolean move_twenty48(unsigned long current_time)
               changed = 1;
               }
             else if ((permode.twenty48.value[prev_led] > 0) &&
-                     (permode.twenty48.value[prev_led] == permode.twenty48.value[current_led]))
+                     (permode.twenty48.value[prev_led] == permode.twenty48.value[current_led]) &&
+                     !permode.twenty48.combined[prev_led] &&
+                     !permode.twenty48.combined[current_led])
               {
               permode.twenty48.value[prev_led]++;
               permode.twenty48.value[current_led] = 0;
+              permode.twenty48.combined[prev_led] = 1;
 
               COPY_COLOR(color[prev_led], permode.twenty48.color[permode.twenty48.value[prev_led]]);
               SET_BLACK(color[current_led]);
@@ -2013,10 +2168,231 @@ boolean move_twenty48(unsigned long current_time)
   return(return_value);
   }
 
+void start_wave(unsigned long start_time)
+  {
+  byte i;
+
+  permode.wave.bright_time = random(WAVE_MAX_BRIGHT_MSECS - WAVE_MIN_BRIGHT_MSECS) + WAVE_MIN_BRIGHT_MSECS;
+  permode.wave.wave_time = permode.wave.bright_time + random(WAVE_MAX_HOLD_MSECS - WAVE_MIN_HOLD_MSECS) + WAVE_MIN_HOLD_MSECS;
+  permode.wave.num_colors = random(WAVE_MAX_COLORS - WAVE_MIN_COLORS) + WAVE_MIN_COLORS;
+
+  for (i = 0; i < permode.wave.num_colors; i++)
+    if ((i == 0) ||
+        (i == (permode.wave.num_colors - 1)) ||
+        (random(100) > WAVE_BLACK_PERCENT) ||
+        ((i > 0) &&
+         IS_BLACK(permode.wave.colors[i - 1])))
+      select_color(permode.wave.colors[i]);
+    else
+      SET_BLACK(permode.wave.colors[i]);
+
+  for (i = 0; i < NUM_LED; i++)
+    {
+    permode.wave.color_num[i] = WAVE_INVALID;
+    COPY_COLOR(permode.wave.saved_color[i], color[i]);
+    }
+
+  i = random(NUM_LED);
+  permode.wave.color_num[i] = 0;
+  permode.wave.start_time[i] = start_time;
+
+  mode_field = MODE_WAVE;
+
+  return;
+  }
+
+boolean move_wave(unsigned long current_time)
+  {
+  byte i;
+  byte j;
+  byte tmp_neighbor;
+  boolean found_match;
+
+  found_match = 0;
+
+  for (i = 0; i < NUM_LED; i++)
+    {
+    if ((permode.wave.color_num[i] != WAVE_INVALID) &&
+        (permode.wave.color_num[i] < permode.wave.num_colors))
+      {
+      if (current_time > (permode.wave.start_time[i] + permode.wave.wave_time))
+        {
+        if (permode.wave.color_num[i] < permode.wave.num_colors)
+          {
+          permode.wave.color_num[i]++;
+          permode.wave.start_time[i] = current_time;
+
+          for (j = 0; j < NUM_NEIGHBORS; j++)
+            if (((tmp_neighbor = get_neighbor(i, j)) != INVALID_LED) &&
+                (permode.wave.color_num[tmp_neighbor] == WAVE_INVALID))
+              {
+              permode.wave.color_num[tmp_neighbor] = 0;
+              permode.wave.start_time[tmp_neighbor] = current_time + (random(WAVE_MAX_DELAY_MSECS - WAVE_MIN_DELAY_MSECS) + WAVE_MIN_DELAY_MSECS);
+              }
+          }
+        }
+      else if (permode.wave.start_time[i] < current_time)
+        {
+        if (current_time > (permode.wave.start_time[i] + permode.wave.bright_time))
+          for (j = 0; j < NUM_NEIGHBORS; j++)
+            if (((tmp_neighbor = get_neighbor(i, j)) != INVALID_LED) &&
+                (permode.wave.color_num[tmp_neighbor] == WAVE_INVALID))
+              {
+              permode.wave.color_num[tmp_neighbor] = 0;
+              permode.wave.start_time[tmp_neighbor] = current_time + (random(WAVE_MAX_DELAY_MSECS - WAVE_MIN_DELAY_MSECS) + WAVE_MIN_DELAY_MSECS);
+              }
+
+        if (permode.wave.color_num[i] == 0)
+          FADE_COLOR(color[i], permode.wave.saved_color[i], permode.wave.colors[permode.wave.color_num[i]], permode.wave.bright_time, current_time - permode.wave.start_time[i]);
+        else
+          FADE_COLOR(color[i], permode.wave.colors[permode.wave.color_num[i] - 1], permode.wave.colors[permode.wave.color_num[i]], permode.wave.bright_time, current_time - permode.wave.start_time[i]);
+        }
+
+      found_match = 1;
+      }
+    else if (permode.wave.color_num[i] == permode.wave.num_colors)
+      {
+      if (current_time > (permode.wave.start_time[i] + permode.wave.wave_time))
+        {
+        permode.wave.color_num[i]++;
+
+        if (IS_BLACK(permode.wave.saved_color[i]))
+          SET_BLACK(color[i]);
+        }
+      else if (IS_BLACK(permode.wave.saved_color[i]))
+        FADE_BLACK(color[i], permode.wave.colors[permode.wave.num_colors - 1], permode.wave.wave_time, current_time - permode.wave.start_time[i]);
+
+      found_match = 1;
+      }
+    }
+
+  if (!found_match)
+    end_wave_undulate(current_time);
+
+  return(1);
+  }
+
+void end_wave_undulate(unsigned long current_time)
+  {
+  byte i;
+
+  for (i = 0; i < NUM_LED; i++)
+    mode[i] = MODE_XMAS;
+
+  mode_field = MODE_XMAS;
+
+  reset_next_time(current_time);
+
+  return;
+  }
+
+void start_undulate(unsigned long start_time)
+  {
+  byte i;
+
+  permode.undulate.num_colors = random(UNDULATE_MAX_COLORS - UNDULATE_MIN_COLORS) + UNDULATE_MIN_COLORS;
+  permode.undulate.up_time = random(UNDULATE_MAX_UP_MSECS - UNDULATE_MIN_UP_MSECS) + UNDULATE_MIN_UP_MSECS;
+  permode.undulate.down_time = random(UNDULATE_MAX_DOWN_MSECS - UNDULATE_MIN_DOWN_MSECS) + UNDULATE_MIN_DOWN_MSECS;
+  permode.undulate.num_updown = (random(UNDULATE_MAX_UPDOWN - UNDULATE_MIN_UPDOWN) + UNDULATE_MIN_UPDOWN) * 2;
+
+  for (i = 0; i < permode.undulate.num_colors; i++)
+    select_color(permode.undulate.color[i]);
+
+  for (i = 0; i < NUM_LED; i++)
+    {
+    COPY_COLOR(permode.undulate.saved_color[i], color[i]);
+    permode.undulate.updown[i] = 0;
+    permode.undulate.color_num[i] = UNDULATE_INVALID_COLOR;
+    }
+
+  i = random(NUM_LED);
+  permode.undulate.color_num[i] = 0;
+  permode.undulate.start_time[i] = start_time;
+
+  mode_field = MODE_UNDULATE;
+
+  return;
+  }
+
+boolean move_undulate(unsigned long current_time)
+  {
+  byte i;
+  byte j;
+  byte tmp_neighbor;
+  boolean found_match;
+
+  found_match = 0;
+  for (i = 0; i < NUM_LED; i++)
+    if ((permode.undulate.color_num[i] != UNDULATE_INVALID_COLOR) &&
+        (permode.undulate.color_num[i] < permode.undulate.num_colors))
+      {
+      if (permode.undulate.start_time[i] < current_time)
+        {
+        if ((permode.undulate.updown[i] % 2) == 0)
+          {
+          if ((permode.undulate.up_time + permode.undulate.start_time[i]) > current_time)
+            {
+            if ((permode.undulate.color_num[i] == 0) &&
+                (permode.undulate.updown[i] == 0))
+              FADE_COLOR(color[i], permode.undulate.saved_color[i], permode.undulate.color[permode.undulate.color_num[i]], permode.undulate.up_time, current_time - permode.undulate.start_time[i]);
+            else
+              FADE_UP(color[i], permode.undulate.color[permode.undulate.color_num[i]], permode.undulate.up_time, current_time - permode.undulate.start_time[i]);
+            }
+          else
+            {
+            COPY_COLOR(color[i], permode.undulate.color[permode.undulate.color_num[i]]);
+
+            permode.undulate.updown[i]++;
+            permode.undulate.start_time[i] = current_time;
+
+            if ((permode.undulate.updown[i] == (permode.undulate.num_updown - 1)) &&
+                (permode.undulate.color_num[i] == (permode.undulate.num_colors - 1)) &&
+                !IS_BLACK(permode.undulate.saved_color[i]))
+              permode.undulate.color_num[i] = permode.undulate.num_colors;
+            else if (permode.undulate.color_num[i] == 0)
+              for (j = 0; j < NUM_NEIGHBORS; j++)
+                if (((tmp_neighbor = get_neighbor(i, j)) != INVALID_LED) &&
+                    (permode.undulate.color_num[tmp_neighbor] == UNDULATE_INVALID_COLOR))
+                  {
+                  permode.undulate.color_num[tmp_neighbor] = 0;
+                  permode.undulate.start_time[tmp_neighbor] = random(UNDULATE_MAX_DELAY_MSECS - UNDULATE_MIN_DELAY_MSECS) + UNDULATE_MIN_DELAY_MSECS + current_time;
+                  }
+            }
+          }
+        else
+          if ((permode.undulate.down_time + permode.undulate.start_time[i]) > current_time)
+            FADE_BLACK(color[i], permode.undulate.color[permode.undulate.color_num[i]], permode.undulate.down_time, current_time - permode.undulate.start_time[i]);
+          else
+            {
+            SET_BLACK(color[i]);
+
+            permode.undulate.updown[i]++;
+            permode.undulate.start_time[i] = random(UNDULATE_MAX_BLACK_DELAY_MSECS - UNDULATE_MIN_BLACK_DELAY_MSECS) + UNDULATE_MIN_BLACK_DELAY_MSECS + current_time;
+
+            if (permode.undulate.updown[i] == permode.undulate.num_updown)
+              {
+              permode.undulate.color_num[i]++;
+
+              if (permode.undulate.color_num[i] < permode.undulate.num_colors)
+                permode.undulate.updown[i] = 0;
+              }
+            }
+        }
+
+      found_match = 1;
+      }
+
+  if (!found_match)
+    end_wave_undulate(current_time);
+
+  return(1);
+  }
+
 void loop()
   {
   unsigned long current_time;
   boolean changed;
+  char chance;
 
   current_time = millis();
   changed = 0;
@@ -2039,19 +2415,58 @@ void loop()
       if (move_twenty48(current_time))
         changed = 1;
       }
+    else if (mode_field == MODE_WAVE)
+      {
+      if (move_wave(current_time))
+        changed = 1;
+      }
+    else if (mode_field == MODE_UNDULATE)
+      {
+      if (move_undulate(current_time))
+        changed = 1;
+      }
     else if ((next_time[TIME_MAJOR] < current_time) &&
              (mode_field == MODE_XMAS))
       {
-      if (random(100) < LIFE_CHANCE_PERCENT)
+      chance = random(100);
+      if (chance < LIFE_CHANCE_PERCENT)
         start_life(current_time);
-      else if (random(100) < STARFIELD_CHANCE_PERCENT)
-        start_starfield(current_time);
-      else if (random(100) < BLINKENLIETZ_CHANCE_PERCENT)
-        start_blinkenlietz(current_time);
-      else if (random(100) < TWENTY48_CHANCE_PERCENT)
-        start_twenty48(current_time);
-      else if (random(100) < SCROLL_CHANCE_PERCENT)
-        move_scroll(current_time);
+      else
+        {
+        chance -= LIFE_CHANCE_PERCENT;
+        if (chance < STARFIELD_CHANCE_PERCENT)
+          start_starfield(current_time);
+        else
+          {
+          chance -= STARFIELD_CHANCE_PERCENT;
+          if (chance < BLINKENLIETZ_CHANCE_PERCENT)
+            start_blinkenlietz(current_time);
+          else
+            {
+            chance -= BLINKENLIETZ_CHANCE_PERCENT;
+            if (chance < TWENTY48_CHANCE_PERCENT)
+              start_twenty48(current_time);
+            else
+              {
+              chance -= TWENTY48_CHANCE_PERCENT;
+              if (chance < SCROLL_CHANCE_PERCENT)
+                move_scroll(current_time);
+              else
+                {
+                chance -= SCROLL_CHANCE_PERCENT;
+                if (chance < WAVE_CHANCE_PERCENT)
+                  start_wave(current_time);
+                else
+                  {
+                  chance -= WAVE_CHANCE_PERCENT;
+                  if (chance < UNDULATE_CHANCE_PERCENT)
+                    start_undulate(current_time);
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     else if ((mode_field == MODE_TRACER) ||
              (mode_field == MODE_XMAS))
